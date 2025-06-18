@@ -9,8 +9,10 @@ import static java.lang.Thread.currentThread;
 
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +32,8 @@ import io.debezium.data.Envelope.Operation;
 import io.debezium.pipeline.ErrorHandler;
 import io.debezium.pipeline.EventDispatcher;
 import io.debezium.pipeline.source.spi.StreamingChangeEventSource;
+import io.debezium.relational.Table;
+import io.debezium.relational.TableEditor;
 import io.debezium.relational.TableId;
 import io.debezium.schema.SchemaChangeEvent;
 import io.debezium.util.Clock;
@@ -239,7 +243,41 @@ public class InformixStreamingChangeEventSource implements StreamingChangeEventS
                 .stopLoggingOnClose(connectorConfig.stopLoggingOnClose());
 
         schema.tableIds().forEach((TableId tid) -> {
+
+            // Get the table schema
+            Table table = schema.tableFor(tid);
+
+            // Get all columns and identify which ones to skip
+            List<String> allColumns = table.retrieveColumnNames();
+            List<String> columnsToSkip = allColumns.stream()
+                    .filter(col -> shouldSkipColumn(tid, col))
+                    .collect(Collectors.toList());
+            // Remove skipped columns from the table schema
+            if (!columnsToSkip.isEmpty()) {
+                // Create new filtered table with same ID and properties
+                TableEditor editor = table.edit();
+
+                // Remove skipped columns while preserving all other properties
+                editor.setColumns(table.columns().stream()
+                        .filter(col -> !columnsToSkip.contains(col.name()))
+                        .collect(Collectors.toList()));
+
+                Table filteredTable = editor.create();
+                schema.tables().overwriteTable(filteredTable);
+
+                if (LOGGER.isInfoEnabled()) {
+                    LOGGER.info("Removed columns {} from table {}",
+                            String.join(", ", columnsToSkip),
+                            tid.identifier());
+                }
+            }
+
             String[] colNames = schema.tableFor(tid).retrieveColumnNames().stream().map(dataConnection::quotedColumnIdString).toArray(String[]::new);
+            if (LOGGER.isInfoEnabled()) {
+                LOGGER.info("Starting capture: schema: {}, catalog: {}, Table ID: {}, column:{}",
+                        tid.schema(), tid.catalog(), tid.identifier(),
+                        String.join(", ", colNames));
+            }
             builder.watchTable(dataConnection.quotedTableIdString(tid), colNames);
         });
 
@@ -452,7 +490,47 @@ public class InformixStreamingChangeEventSource implements StreamingChangeEventS
                 new InformixChangeRecordEmitter(partition, offsetContext, operation,
                         InformixChangeRecordEmitter.convertIfxData2Array(before, schema.schemaFor(tableId)),
                         InformixChangeRecordEmitter.convertIfxData2Array(after, schema.schemaFor(tableId)),
-                        clock, connectorConfig));
+                        clock, connectorConfig, schema.schemaFor(tableId)));
+    }
+
+    private boolean shouldSkipColumn(TableId tableId, String columnName) {
+        String skipList = connectorConfig.getColumnSkipList();
+        if (skipList == null || skipList.trim().isEmpty()) {
+            return false;
+        }
+
+        String[] patterns = skipList.split(",");
+        // Format with schema: database.schema.table.column
+        String fullNameWithSchema = String.format("%s.%s.%s.%s",
+                tableId.catalog(),
+                tableId.schema(),
+                tableId.table(),
+                columnName);
+
+        // Format without schema: database.table.column
+        String fullNameWithoutSchema = String.format("%s.%s.%s",
+                tableId.catalog(),
+                tableId.table(),
+                columnName);
+
+        for (String pattern : patterns) {
+            pattern = pattern.trim();
+            if (pattern.isEmpty()) {
+                continue;
+            }
+
+            // If pattern contains dots, try both formats
+            if (pattern.contains(".")) {
+                if (fullNameWithSchema.matches(pattern) || fullNameWithoutSchema.matches(pattern)) {
+                    return true;
+                }
+            }
+            // Otherwise match only column name
+            else if (columnName.matches(pattern)) {
+                return true;
+            }
+        }
+        return false;
     }
 
 }

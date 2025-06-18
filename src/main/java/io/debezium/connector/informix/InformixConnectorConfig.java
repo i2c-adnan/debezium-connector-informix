@@ -5,6 +5,7 @@
  */
 package io.debezium.connector.informix;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.apache.kafka.common.config.ConfigDef;
@@ -18,6 +19,8 @@ import io.debezium.config.EnumeratedValue;
 import io.debezium.config.Field;
 import io.debezium.connector.AbstractSourceInfo;
 import io.debezium.connector.SourceInfoStructMaker;
+import io.debezium.connector.informix.skip.CaptureSkipConfig;
+import io.debezium.connector.informix.skip.SkipConfigParser;
 import io.debezium.document.Document;
 import io.debezium.jdbc.JdbcConfiguration;
 import io.debezium.relational.ColumnFilterMode;
@@ -374,6 +377,28 @@ public class InformixConnectorConfig extends HistorizedRelationalDatabaseConnect
     public static final Field FIELD_NAME_ADJUSTMENT_MODE = CommonConnectorConfig.FIELD_NAME_ADJUSTMENT_MODE
             .withGroup(Field.createGroupEntry(Field.Group.CONNECTOR, 8));
 
+    public static final Field COLUMN_SKIP_LIST = Field.create("column.skip.list")
+            .withDisplayName("Column Skip List")
+            .withType(ConfigDef.Type.STRING)
+            .withGroup(Field.createGroupEntry(Field.Group.CONNECTOR_ADVANCED, 3))
+            .withWidth(Width.LONG)
+            .withImportance(Importance.MEDIUM)
+            .withDescription(
+                    "An optional, comma-separated list of regular expressions that match the fully-qualified names of columns to exclude from change event capture. Fully-qualified names follow the formats: databaseName.tableName.columnName or databaseName.schemaName.tableName.columnName. If only column names are given, they will be matched against the column name only.")
+            .withDefault("");
+
+    public static final Field SKIP_OPERATIONS_CONFIG = Field.create("skip.operations.config")
+            .withDisplayName("Skip Operations Configuration")
+            .withType(ConfigDef.Type.STRING)
+            .withGroup(Field.createGroupEntry(Field.Group.CONNECTOR_ADVANCED, 2))
+            .withWidth(Width.LONG)
+            .withImportance(Importance.MEDIUM)
+            .withDescription("JSON configuration for skipping specific operations based on table and conditions. "
+                    + "Format: [{\"tableName\": \"table1\", \"operations\": [\"i\",\"u\"], \"conditions\": "
+                    + "[{\"columnName\": \"col1\", \"operator\": \"=\", \"value\": \"val1\", \"logicalOperator\": \"AND\"}]}]")
+            .withValidation(InformixConnectorConfig::validateSkipConfig)
+            .withDefault("[]");
+
     private static final ConfigDefinition CONFIG_DEFINITION = HistorizedRelationalDatabaseConnectorConfig.CONFIG_DEFINITION.edit()
             .name("Informix")
             .type(
@@ -382,7 +407,9 @@ public class InformixConnectorConfig extends HistorizedRelationalDatabaseConnect
                     USER,
                     PASSWORD,
                     DATABASE_NAME,
-                    QUERY_TIMEOUT_MS)
+                    QUERY_TIMEOUT_MS,
+                    SKIP_OPERATIONS_CONFIG,
+                    COLUMN_SKIP_LIST)
             .connector(
                     SNAPSHOT_MODE,
                     SNAPSHOT_ISOLATION_MODE,
@@ -418,6 +445,21 @@ public class InformixConnectorConfig extends HistorizedRelationalDatabaseConnect
     private final int cdcTimeout;
     private final boolean stopLoggingOnClose;
 
+    private final List<CaptureSkipConfig> skipConfigs;
+    private final String columnSkipList;
+
+    private static int validateSkipConfig(Configuration config, Field field, Field.ValidationOutput problems) {
+        String skipConfigJson = config.getString(field);
+        try {
+            SkipConfigParser.parse(skipConfigJson);
+            return 0;
+        }
+        catch (Exception e) {
+            problems.accept(field, skipConfigJson, "Invalid skip configuration JSON format: " + e.getMessage());
+            return 1;
+        }
+    }
+
     private final SnapshotLockingMode snapshotLockingMode;
 
     public InformixConnectorConfig(Configuration config) {
@@ -429,6 +471,8 @@ public class InformixConnectorConfig extends HistorizedRelationalDatabaseConnect
                 false,
                 ColumnFilterMode.SCHEMA,
                 false);
+        this.skipConfigs = SkipConfigParser.parse(config.getString(SKIP_OPERATIONS_CONFIG));
+        this.columnSkipList = config.getString(COLUMN_SKIP_LIST);
 
         this.databaseName = config.getString(DATABASE_NAME);
         this.snapshotMode = SnapshotMode.parse(config.getString(SNAPSHOT_MODE), SNAPSHOT_MODE.defaultValueAsString());
@@ -512,4 +556,13 @@ public class InformixConnectorConfig extends HistorizedRelationalDatabaseConnect
             return !(t.table().toLowerCase().startsWith("sys"));
         }
     }
+
+    public List<CaptureSkipConfig> getSkipConfigs() {
+        return skipConfigs;
+    }
+
+    public String getColumnSkipList() {
+        return columnSkipList;
+    }
+
 }
