@@ -5,12 +5,14 @@
  */
 package io.debezium.connector.informix;
 
+import static io.debezium.heartbeat.HeartbeatErrorHandler.DEFAULT_NOOP_ERRORHANDLER;
+
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
-import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +23,7 @@ import io.debezium.config.Configuration;
 import io.debezium.config.Field;
 import io.debezium.connector.base.ChangeEventQueue;
 import io.debezium.connector.common.BaseSourceTask;
+import io.debezium.connector.common.DebeziumHeaderProducer;
 import io.debezium.document.DocumentReader;
 import io.debezium.jdbc.DefaultMainConnectionProvidingConnectionFactory;
 import io.debezium.jdbc.MainConnectionProvidingConnectionFactory;
@@ -75,17 +78,12 @@ public class InformixConnectorTask extends BaseSourceTask<InformixPartition, Inf
                 () -> new InformixConnection(connectorConfig.getCdcJdbcConfig()));
         dataConnection = connectionFactory.mainConnection();
         cdcConnection = cdcConnectionFactory.mainConnection();
-        try {
-            dataConnection.setAutoCommit(false);
-        }
-        catch (SQLException e) {
-            throw new ConnectException(e);
-        }
 
         final InformixValueConverters valueConverters = new InformixValueConverters(connectorConfig.getDecimalMode(), connectorConfig.getTemporalPrecisionMode(),
                 connectorConfig.binaryHandlingMode());
         schema = new InformixDatabaseSchema(connectorConfig, topicNamingStrategy, valueConverters, schemaNameAdjuster, dataConnection);
         schema.initializeStorage();
+        taskContext = new InformixTaskContext(connectorConfig, schema);
 
         Offsets<InformixPartition, InformixOffsetContext> previousOffsets = getPreviousOffsets(new InformixPartition.Provider(connectorConfig),
                 new InformixOffsetContext.Loader(connectorConfig));
@@ -97,6 +95,7 @@ public class InformixConnectorTask extends BaseSourceTask<InformixPartition, Inf
         connectorConfig.getBeanRegistry().add(StandardBeanNames.JDBC_CONNECTION, dataConnection);
         connectorConfig.getBeanRegistry().add(StandardBeanNames.VALUE_CONVERTER, valueConverters);
         connectorConfig.getBeanRegistry().add(StandardBeanNames.OFFSETS, previousOffsets);
+        connectorConfig.getBeanRegistry().add(StandardBeanNames.CDC_SOURCE_TASK_CONTEXT, taskContext);
 
         // Service providers
         registerServiceProviders(connectorConfig.getServiceRegistry());
@@ -106,10 +105,8 @@ public class InformixConnectorTask extends BaseSourceTask<InformixPartition, Inf
 
         final SnapshotterService snapshotterService = connectorConfig.getServiceRegistry().tryGetService(SnapshotterService.class);
 
-        validateAndLoadSchemaHistory(connectorConfig, dataConnection::validateLogPosition, previousOffsets, schema,
+        validateSchemaHistory(connectorConfig, dataConnection::validateLogPosition, previousOffsets, schema,
                 snapshotterService.getSnapshotter());
-
-        taskContext = new InformixTaskContext(connectorConfig, schema);
 
         final Clock clock = Clock.system();
 
@@ -121,7 +118,7 @@ public class InformixConnectorTask extends BaseSourceTask<InformixPartition, Inf
                 .loggingContextSupplier(() -> taskContext.configureLoggingContext(CONTEXT_NAME))
                 .build();
 
-        errorHandler = new ErrorHandler(InformixConnector.class, connectorConfig, queue, errorHandler);
+        errorHandler = new InformixErrorHandler(connectorConfig, queue, errorHandler);
 
         final InformixEventMetadataProvider metadataProvider = new InformixEventMetadataProvider();
 
@@ -141,7 +138,11 @@ public class InformixConnectorTask extends BaseSourceTask<InformixPartition, Inf
                 connectorConfig.getTableFilters().dataCollectionFilter(),
                 DataChangeEvent::new,
                 null,
-                connectorConfig.createHeartbeat(topicNamingStrategy, schemaNameAdjuster, null, null),
+                connectorConfig.createHeartbeat(
+                        topicNamingStrategy,
+                        schemaNameAdjuster,
+                        () -> new InformixConnection(connectorConfig.getJdbcConfig()),
+                        DEFAULT_NOOP_ERRORHANDLER),
                 schemaNameAdjuster,
                 new InformixTransactionMonitor(
                         connectorConfig,
@@ -151,7 +152,8 @@ public class InformixConnectorTask extends BaseSourceTask<InformixPartition, Inf
                             queue.enqueue(new DataChangeEvent(record));
                         },
                         topicNamingStrategy.transactionTopic()),
-                signalProcessor);
+                signalProcessor,
+                connectorConfig.getServiceRegistry().tryGetService(DebeziumHeaderProducer.class));
 
         final NotificationService<InformixPartition, InformixOffsetContext> notificationService = new NotificationService<>(
                 getNotificationChannels(),
@@ -178,11 +180,21 @@ public class InformixConnectorTask extends BaseSourceTask<InformixPartition, Inf
     }
 
     @Override
+    protected String connectorName() {
+        return Module.name();
+    }
+
+    @Override
     protected List<SourceRecord> doPoll() throws InterruptedException {
 
         return queue.poll().stream()
                 .map(DataChangeEvent::getRecord)
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    protected Optional<ErrorHandler> getErrorHandler() {
+        return Optional.of(errorHandler);
     }
 
     @Override

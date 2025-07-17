@@ -4,12 +4,12 @@
     <parent>
         <groupId>io.debezium</groupId>
         <artifactId>debezium-parent</artifactId>
-        <version>3.0.5-SNAPSHOT</version>
+        <version>3.3.0-SNAPSHOT</version>
     </parent>
 
     <modelVersion>4.0.0</modelVersion>
     <artifactId>debezium-connector-informix</artifactId>
-    <version>3.0.5-SNAPSHOT</version>
+    <version>3.3.0-SNAPSHOT</version>
     <name>Debezium Connector for Informix Server</name>
     <packaging>jar</packaging>
 
@@ -50,9 +50,9 @@
 
     <repositories>
         <repository>
-            <id>oss</id>
-            <name>OSS Sonatype Nexus</name>
-            <url>https://s01.oss.sonatype.org/content/repositories/snapshots</url>
+            <id>central-snapshots</id>
+            <name>Maven Central Snapshots</name>
+            <url>${publish.snapshot.url}</url>
             <releases>
                 <enabled>true</enabled>
                 <updatePolicy>never</updatePolicy>
@@ -68,6 +68,11 @@
     <dependencyManagement>
         <dependencies>
             <!-- Debezium artifacts -->
+            <dependency>
+                <groupId>io.debezium</groupId>
+                <artifactId>debezium-common</artifactId>
+                <version>${version.debezium}</version>
+            </dependency>
             <dependency>
                 <groupId>io.debezium</groupId>
                 <artifactId>debezium-core</artifactId>
@@ -86,6 +91,11 @@
             <dependency>
                 <groupId>io.debezium</groupId>
                 <artifactId>debezium-storage-file</artifactId>
+                <version>${version.debezium}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.debezium</groupId>
+                <artifactId>debezium-common</artifactId>
                 <version>${version.debezium}</version>
             </dependency>
 
@@ -356,7 +366,7 @@
                             </external>
                         </image>
                         <image>
-                            <name>apicurio/apicurio-registry-mem:${version.apicurio}</name>
+                            <name>quay.io/apicurio/apicurio-registry-mem:${version.apicurio}</name>
                             <run>
                                 <namingStrategy>none</namingStrategy>
                                 <ports>
@@ -536,7 +546,8 @@
             </activation>
             <properties>
                 <informix.version>12</informix.version>
-                <informix.image.registry>docker.io/ibmcom</informix.image.registry>
+                <informix.image.registry>quay.io/debezium</informix.image.registry>
+                <informix.image>ibmcom-informix-developer-database</informix.image>
                 <informix.image.tag>12.10.FC12W1DE</informix.image.tag>
                 <informix.run.wait.log>Logical Log \d Complete</informix.run.wait.log>
             </properties>
@@ -588,6 +599,7 @@
             <properties>
                 <informix.version>14</informix.version>
                 <informix.image.registry>icr.io/informix</informix.image.registry>
+                <informix.image>informix-developer-database</informix.image>
                 <informix.image.tag>14.10.FC9W1DE</informix.image.tag>
                 <informix.run.wait.log>SCHAPI: Started \d dbWorker threads</informix.run.wait.log>
             </properties>
@@ -634,6 +646,63 @@
             </build>
         </profile>
         <profile>
+            <id>informix15</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+                <property>
+                    <name>informix15</name>
+                </property>
+            </activation>
+            <properties>
+                <informix.version>15</informix.version>
+                <informix.image.registry>icr.io/informix</informix.image.registry>
+                <informix.image>informix-developer-edition-database</informix.image>
+                <informix.image.tag>15.0</informix.image.tag>
+                <informix.run.wait.log>SCHAPI: Started \d dbWorker threads</informix.run.wait.log>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>io.fabric8</groupId>
+                        <artifactId>docker-maven-plugin</artifactId>
+                        <configuration>
+                            <images>
+                                <image>
+                                    <run>
+                                        <env>
+                                            <RUN_FILE_POST_INIT>informix_post_init.sh</RUN_FILE_POST_INIT>
+                                        </env>
+                                    </run>
+                                    <build>
+                                        <assembly>
+                                            <inline>
+                                                <includeBaseDirectory>false</includeBaseDirectory>
+                                                <files>
+                                                    <file>
+                                                        <source>${project.basedir}/src/test/docker/informix-cdc-docker/15/informix_post_init.sh</source>
+                                                        <outputDirectory>config</outputDirectory>
+                                                        <lineEnding>unix</lineEnding>
+                                                        <fileMode>755</fileMode>
+                                                    </file>
+                                                    <file>
+                                                        <source>${project.basedir}/src/test/docker/informix-cdc-docker/15/testdb.sql</source>
+                                                        <outputDirectory>informix/etc</outputDirectory>
+                                                        <lineEnding>unix</lineEnding>
+                                                    </file>
+                                                </files>
+                                            </inline>
+                                            <targetDir>/opt/ibm</targetDir>
+                                            <user>informix:informix</user>
+                                        </assembly>
+                                    </build>
+                                </image>
+                            </images>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
             <id>apicurio</id>
             <activation>
                 <activeByDefault>false</activeByDefault>
@@ -656,7 +725,7 @@
                 </plugins>
             </build>
             <properties>
-                <docker.filter>${docker.dbs}:${informix.version},apicurio/apicurio-registry-mem:${version.apicurio}</docker.filter>
+                <docker.filter>${docker.dbs}:${informix.version},quay.io/apicurio/apicurio-registry-mem:${version.apicurio}</docker.filter>
             </properties>
         </profile>
     </profiles>

@@ -1,7 +1,7 @@
 
 [![License](http://img.shields.io/:license-apache%202.0-brightgreen.svg)](http://www.apache.org/licenses/LICENSE-2.0.html)
-[![Maven Central](https://maven-badges.herokuapp.com/maven-central/io.debezium/debezium-connector-informix/badge.svg)](http://search.maven.org/#search%7Cga%7C1%7Cg%3A%22io.debezium%22)
-[![Build Status](https://github.com/debezium/debezium-connector-informix/actions/workflows/maven.yml/badge.svg)](https://github.com/debezium/debezium-connector-informix/actions)
+[![Maven Central](https://img.shields.io/maven-central/v/io.debezium/debezium-connector-informix)](https://search.maven.org/#search|ga|1|g:io.debezium+a:debezium-connector-informix)
+[![Build Status](https://github.com/debezium/debezium-connector-informix/actions/workflows/maven.yml/badge.svg)](https://github.com/debezium/debezium-connector-informix/actions/workflows/maven.yml)
 [![User chat](https://img.shields.io/badge/chat-users-brightgreen.svg)](https://gitter.im/debezium/user)
 [![Developer chat](https://img.shields.io/badge/chat-devs-brightgreen.svg)](https://gitter.im/debezium/dev)
 [![Google Group](https://img.shields.io/:mailing%20list-debezium-brightgreen.svg)](https://groups.google.com/forum/#!forum/debezium)
@@ -14,9 +14,8 @@ Licensed under the [Apache License, Version 2.0](http://www.apache.org/licenses/
 
 Debezium is an open source project that provides a low latency data streaming platform for change data capture (CDC).
 
-This repository contains incubating connector for Informix which is in an **early stage of its development**.
-You are encouraged to explore this connector and test it, but it is not recommended yet for production usage.
-E.g. the format of emitted messages may change, specific features may not be implemented yet etc.
+This repository contains the connector for IBM Informix.
+You are encouraged to explore this connector and test it. Although specific features may not be implemented yet, it should be stable enough for production usage.
 
 Documentation on how to use the connector and the internal workings can be found [here](https://debezium.io/documentation/reference/stable/connectors/informix.html). See in this [Dockerfile](src/test/docker/informix-cdc-docker/14/Dockerfile) how [this script](src/test/docker/informix-cdc-docker/14/informix_post_init.sh) is used to set up the CDC database in the docker Informix instance.
 

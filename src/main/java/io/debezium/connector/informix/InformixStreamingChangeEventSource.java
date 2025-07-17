@@ -235,11 +235,12 @@ public class InformixStreamingChangeEventSource implements StreamingChangeEventS
         IfxCDCEngine.Builder builder = IfxCDCEngine
                 .builder(dataConnection.datasource())
                 .buffer(connectorConfig.getCdcBuffersize())
-                .timeout(connectorConfig.getCdcTimeout());
+                .timeout(connectorConfig.getCdcTimeout())
+                .stopLoggingOnClose(connectorConfig.stopLoggingOnClose());
 
         schema.tableIds().forEach((TableId tid) -> {
-            String[] colNames = schema.tableFor(tid).retrieveColumnNames().toArray(String[]::new);
-            builder.watchTable(tid.identifier(), colNames);
+            String[] colNames = schema.tableFor(tid).retrieveColumnNames().stream().map(dataConnection::quoteIdentifier).toArray(String[]::new);
+            builder.watchTable(dataConnection.quotedTableIdString(tid), colNames);
         });
 
         if (startLsn.isAvailable()) {
